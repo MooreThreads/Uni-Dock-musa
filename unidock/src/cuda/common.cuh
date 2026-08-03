@@ -1,5 +1,9 @@
 #pragma once
+#ifdef ENABLE_MUSA
+#include "musa_compat.h"
+#else
 #include "curand_kernel.h"
+#endif
 #include "kernel.h"
 #include "math.h"
 #include <cmath>
@@ -1042,6 +1046,7 @@ __device__ __forceinline__ float find_change_index_read(const change_cuda_t *g, 
     index -= 3;
     if (index < g->lig_torsion_size) return g->lig_torsion[index];
     DEBUG_PRINTF("\nKernel2:find_change_index_read() ERROR!"); /* Shouldn't be here */
+    return 0;
 }
 template<typename Config>
 __device__ __forceinline__ float find_change_index_read(const change_cuda_t_<Config> *g, int index) {
@@ -1051,6 +1056,7 @@ __device__ __forceinline__ float find_change_index_read(const change_cuda_t_<Con
     index -= 3;
     if (index < g->lig_torsion_size) return g->lig_torsion[index];
     DEBUG_PRINTF("\nKernel2:find_change_index_read() ERROR!"); /* Shouldn't be here */
+    return 0;
 }
 
 __device__ __forceinline__ void find_change_index_write(change_cuda_t *g, int index, float data) {

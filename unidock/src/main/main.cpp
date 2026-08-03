@@ -29,8 +29,14 @@
 #include "utils.h"
 #include "scoring_function.h"
 
+#ifdef ENABLE_MUSA
+#include <musa_runtime.h>
+#include <device_launch_parameters.h>
+#include "../cuda/musa_compat.h"
+#else
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
+#endif
 #include "simulation_container.h"
 
 struct usage_error : public std::runtime_error {
@@ -966,12 +972,24 @@ bug reporting, license agreements, and more information.      \n";
             bool use_v100 = true;
             bool ad4 = false;
             if (sf_name.compare("ad4") == 0) ad4 = true;
+#ifdef ENABLE_MUSA
+            musaGetDeviceCount(&deviceCount);
+#else
             cudaGetDeviceCount(&deviceCount);
+#endif
             if (deviceCount > 0) {
+#ifdef ENABLE_MUSA
+                checkCUDA(musaSetDevice(device_id));
+#else
                 checkCUDA(cudaSetDevice(device_id));
+#endif
 
                 printf("Set GPU device id to %d\n", device_id);
+#ifdef ENABLE_MUSA
+                musaMemGetInfo(&avail, &total);
+#else
                 cudaMemGetInfo(&avail, &total);
+#endif
                 printf("Available Memory = %dMiB   Total Memory = %dMiB\n",
                        int(avail / 1024 / 1024), int(total / 1024 / 1024));
                 max_gpu_memory = avail / 1024 / 1024 * 0.95;  // leave 5%

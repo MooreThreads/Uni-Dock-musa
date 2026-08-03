@@ -2,6 +2,7 @@
 __pycache__
 build/
 .cache
+.gluon/
 test/ligands
 test/results
 .vscode

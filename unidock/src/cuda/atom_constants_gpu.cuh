@@ -117,6 +117,12 @@ __device__ __constant__ sz SY_TYPE_SIZE = 18;
 
 #endif
 
+// MUSA does not expose the host libc strcmp to device code.
+__device__ int gpu_string_compare(const char *a, const char *b) {
+    while (*a && *a == *b) { ++a; ++b; }
+    return static_cast<unsigned char>(*a) - static_cast<unsigned char>(*b);
+}
+
 struct atom_kind_gpu {
     char name[4];
     fl radius;
@@ -384,7 +390,7 @@ __device__ __constant__ char non_ad_metal_names_gpu[][4] = {  // expand as neces
 __device__ __forceinline__ bool is_non_ad_metal_name_gpu(const char name[4]) {
     const sz s = sizeof(non_ad_metal_names_gpu) / (sizeof(char) * 4);
     VINA_FOR(i, s)
-    if (strcmp(non_ad_metal_names_gpu[i], name) == 0) return true;
+    if (gpu_string_compare(non_ad_metal_names_gpu[i], name) == 0) return true;
     return false;
 }
 
@@ -421,9 +427,9 @@ __device__ __forceinline__ sz string_to_ad_type_gpu(
     const char *name) {  // returns AD_TYPE_SIZE if not found (no exceptions thrown, because metals
                          // unknown to AD4 are not exceptional)
     VINA_FOR(i, atom_kinds_size_gpu)
-    if (strcmp(atom_kind_data_gpu[i].name, name) == 0) return i;
+    if (gpu_string_compare(atom_kind_data_gpu[i].name, name) == 0) return i;
     VINA_FOR(i, atom_equivalences_size_gpu)
-    if (strcmp(atom_equivalence_data_gpu[i].name, name) == 0)
+    if (gpu_string_compare(atom_equivalence_data_gpu[i].name, name) == 0)
         return string_to_ad_type_gpu(atom_equivalence_data_gpu[i].to);
     return AD_TYPE_SIZE;
 }

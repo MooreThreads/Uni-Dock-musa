@@ -5,8 +5,19 @@ project(
   VERSION 1.2.0
   DESCRIPTION "GPU-Accelerated Docking with 1000-fold speedup"
   HOMEPAGE_URL "https://github.com/dptech-corp/Uni-Dock"
-  LANGUAGES CXX CUDA)
+  LANGUAGES CXX)
 set(VINA_BIN_NAME unidock)
+
+option(ENABLE_MUSA "Build the native MUSA engine with MUSA 5.2.0" OFF)
+if(ENABLE_MUSA)
+  set(MUSA_ARCHITECTURE "mp_31" CACHE STRING "Native MUSA offload architecture")
+  list(APPEND CMAKE_MODULE_PATH /usr/local/musa/cmake)
+  include(EnableMUSALanguage)
+  find_package(MUSAToolkit 5.2.0 EXACT REQUIRED)
+  enable_language(MUSA)
+else()
+  enable_language(CUDA)
+endif()
 
 # Make sure the default is a release build
 if(NOT CMAKE_BUILD_TYPE)
@@ -15,20 +26,26 @@ endif()
 
 # >>>>>> Language Configuration Begin
 # CUDA 13's bundled CCCL / libcu++ requires C++17; CUDA 12.x keeps C++14.
-if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 13.0)
+if(ENABLE_MUSA)
+  set(CMAKE_CXX_STANDARD 14)
+elseif(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 13.0)
   set(CMAKE_CXX_STANDARD 17)
   set(CMAKE_CUDA_STANDARD 17)
 else()
   set(CMAKE_CXX_STANDARD 14)
 endif()
 
-set(CMAKE_CUDA_FLAGS_DEBUG "-g -G")
+if(NOT ENABLE_MUSA)
+  set(CMAKE_CUDA_FLAGS_DEBUG "-g -G")
+endif()
 option(Boost_USE_STATIC_LIBS "Whether to use static libs for boost" OFF)
 
 include(CheckLanguage)
-check_language(CUDA)
+if(NOT ENABLE_MUSA)
+  check_language(CUDA)
+endif()
 
-if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+if(NOT ENABLE_MUSA AND NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   # https://en.wikipedia.org/wiki/CUDA#GPUs_supported
   set(CMAKE_CUDA_ARCHITECTURES
     75 # RTX 20, T4
@@ -48,7 +65,7 @@ endif()
 # Add fast math for release build
 option(BUILD_FAST_MATH "Build in fast math mode" ON)
 
-if(BUILD_FAST_MATH)
+if(BUILD_FAST_MATH AND NOT ENABLE_MUSA)
   set(CMAKE_CUDA_FLAGS_RELEASE "${CMAKE_CUDA_FLAGS_RELEASE} --use_fast_math")
   message(
     "CMAKE_CUDA_FLAGS_RELEASE updated for fast_math: ${CMAKE_CUDA_FLAGS_RELEASE}"
@@ -56,7 +73,11 @@ if(BUILD_FAST_MATH)
 endif()
 
 # Add preprocessor definitions
-add_compile_definitions(ENABLE_CUDA) # ENABLE_CUDA is required
+if(ENABLE_MUSA)
+  add_compile_definitions(ENABLE_MUSA)
+else()
+  add_compile_definitions(ENABLE_CUDA)
+endif()
 add_compile_definitions(VERSION="v${PROJECT_VERSION}")
 
 # >>>>>> Language Configuration End
@@ -73,12 +94,12 @@ find_package(OpenMP REQUIRED)
 option(FETCH_BOOST "Whether to use FetchContent to include boost" OFF)
 set(REQUIRED_BOOST_COMPONENTS
   system thread serialization
-  filesystem program_options timer
+  filesystem program_options timer log
 )
 # Header-only Boost used (transitively) by the CUDA sources, e.g. boost/math/quaternion.hpp
 # via quaternion.h -> conf.h -> tree.h -> model.h. Must be part of the fetched Boost so the
 # cuda target resolves these to the fetched headers, not a (possibly newer) system Boost (#189).
-set(REQUIRED_BOOST_CUDA_HEADERS math)
+set(REQUIRED_BOOST_CUDA_HEADERS math ptr_container property_tree multi_index)
 
 Set(FETCHCONTENT_QUIET FALSE) # Needed to print downloading progress
 
@@ -95,6 +116,12 @@ if(FETCH_BOOST)
     DOWNLOAD_NO_EXTRACT FALSE
   )
   FetchContent_MakeAvailable(Boost)
+  FetchContent_GetProperties(Boost)
+  # ptr_container is header-only and is not exported as a CMake target by
+  # Boost 1.84, but remains part of the upstream engine's public model graph.
+  include_directories(${boost_SOURCE_DIR}/libs/ptr_container/include)
+  include_directories(${boost_SOURCE_DIR}/libs/property_tree/include)
+  include_directories(${boost_SOURCE_DIR}/libs/multi_index/include)
 else()
   find_package(Boost 1.72 REQUIRED COMPONENTS ${REQUIRED_BOOST_COMPONENTS})
   include_directories(${Boost_INCLUDE_DIRS})
@@ -117,7 +144,7 @@ list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 add_library(boost_deps INTERFACE)
 target_link_libraries(
   boost_deps INTERFACE Boost::system Boost::thread Boost::serialization
-  Boost::filesystem Boost::program_options Boost::timer)
+  Boost::filesystem Boost::program_options Boost::timer Boost::log)
 
 add_library(
   lib OBJECT
@@ -139,9 +166,24 @@ add_library(
   src/lib/vina.cpp
 )
 target_include_directories(lib PUBLIC src/lib src/cuda)
+if(ENABLE_MUSA)
+  target_include_directories(lib PUBLIC ${MUSAToolkit_INCLUDE_DIRS})
+endif()
+target_link_libraries(lib PUBLIC boost_deps)
+if(FETCH_BOOST)
+  target_link_libraries(lib PUBLIC Boost::math)
+endif()
 
-add_library(cuda OBJECT src/cuda/monte_carlo.cu src/cuda/precalculate.cu)
+if(ENABLE_MUSA)
+  add_library(cuda OBJECT src/cuda/monte_carlo.mu src/cuda/precalculate.mu)
+  target_compile_options(cuda PRIVATE
+    $<$<COMPILE_LANGUAGE:MUSA>:--offload-arch=${MUSA_ARCHITECTURE}>
+    $<$<AND:$<COMPILE_LANGUAGE:MUSA>,$<BOOL:${BUILD_FAST_MATH}>>:--use_fast_math>)
+else()
+  add_library(cuda OBJECT src/cuda/monte_carlo.cu src/cuda/precalculate.cu)
+endif()
 target_include_directories(cuda PUBLIC src/lib src/cuda)
+target_link_libraries(cuda PUBLIC boost_deps)
 # When using fetched Boost, link the header-only Boost::math so the CUDA target picks up the
 # fetched Boost headers instead of a newer system Boost (>=1.90 breaks nvcc with a
 # "constexpr constexpr" error in boost/math). See #189.
@@ -159,11 +201,19 @@ target_link_libraries(${VINA_BIN_NAME} PRIVATE
   boost_deps cuda lib
   OpenMP::OpenMP_CXX
 )
+if(ENABLE_MUSA)
+  target_link_libraries(${VINA_BIN_NAME} PRIVATE MUSA::musart)
+  target_link_options(${VINA_BIN_NAME} PRIVATE -no-pie)
+endif()
 install(TARGETS ${VINA_BIN_NAME})
 
 # For detecting CUDA memory size
-target_include_directories(${VINA_BIN_NAME}
-  PUBLIC ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+if(ENABLE_MUSA)
+  target_include_directories(${VINA_BIN_NAME} PUBLIC ${MUSAToolkit_INCLUDE_DIRS})
+else()
+  target_include_directories(${VINA_BIN_NAME}
+    PUBLIC ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+endif()
 
 # >>> split
 add_executable(split src/split/split.cpp)
@@ -180,6 +230,10 @@ target_link_libraries(unit_tests PRIVATE
   OpenMP::OpenMP_CXX
   Catch2::Catch2WithMain
 )
+if(ENABLE_MUSA)
+  target_link_libraries(unit_tests PRIVATE MUSA::musart)
+  target_link_options(unit_tests PRIVATE -no-pie)
+endif()
 
 include(CTest)
 include(Catch)

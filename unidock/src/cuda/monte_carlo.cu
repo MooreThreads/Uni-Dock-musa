@@ -23,7 +23,9 @@
 
 
 #include "common.cuh"
+#ifndef ENABLE_MUSA
 #include "curand_kernel.h"
+#endif
 #include "kernel.h"
 #include "math.h"
 #include "warp_ops.cuh"
@@ -2408,7 +2410,7 @@ __host__ void monte_carlo_template::operator()(model &m, output_container &out, 
     VINA_CHECK(out.front().e <= out.back().e);  // make sure the sorting worked in the correct order
                                       }
 template <typename Config>
-__host__ void monte_carlo_template::do_docking_base<Config>(std::vector<model> &m_gpu, std::vector<output_container> &out_gpu,
+__host__ void monte_carlo_template::do_docking_base(std::vector<model> &m_gpu, std::vector<output_container> &out_gpu,
     std::vector<precalculate_byatom> &p_gpu, triangular_matrix_cuda_t *m_data_list_gpu,
     const igrid &ig, const vec &corner1, const vec &corner2, rng &generator, int verbosity,
     unsigned long long seed, std::vector<std::vector<bias_element>> &bias_batch_list) const {

@@ -1,12 +1,21 @@
 #pragma once
 
+#ifdef ENABLE_MUSA
+#include "musa_compat.h"
+#endif
 #include <stdexcept>
 template <typename T>
 void check(T result, char const *const func, const char *const file, int const line) {
     if (result) {
+#ifdef ENABLE_MUSA
+        printf("MUSA error at %s:%d code=%d(%s) \"%s\" \n", file, line,
+               static_cast<unsigned int>(result), musaGetErrorName(result), func);
+        throw std::runtime_error("MUSA Runtime Error");
+#else
         printf("CUDA error at %s:%d code=%d(%s) \"%s\" \n", file, line,
                static_cast<unsigned int>(result), cudaGetErrorName(result), func);
         throw std::runtime_error("CUDA Runtime Error");
+#endif
     }
 }
 #define checkCUDA(val) check((val), #val, __FILE__, __LINE__)

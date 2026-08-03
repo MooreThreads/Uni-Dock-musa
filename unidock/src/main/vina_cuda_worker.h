@@ -86,7 +86,11 @@ class vina_cuda_worker : public Vina {
             boost::filesystem::create_directory(out_dir);
         }
         m_seed = seed;
+#ifdef ENABLE_MUSA
+        checkCUDA(musaSetDevice(m_device_id));
+#else
         checkCUDA(cudaSetDevice(m_device_id));
+#endif
     }
 
 public:
