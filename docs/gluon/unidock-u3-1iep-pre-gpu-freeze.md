@@ -37,7 +37,7 @@ OMP_NUM_THREADS=2 unidock \
 The frozen native MUSA command is:
 
 ```text
-MUSA_VISIBLE_DEVICES=1 OMP_NUM_THREADS=2 unidock \
+OMP_NUM_THREADS=2 unidock \
   --receptor unidock/test/receptor/1iep_receptor.pdbqt \
   --gpu_batch unidock/test/ligands/1iep_ligand.pdbqt \
   --dir <gpu-output> --device_id 0 \
@@ -46,8 +46,12 @@ MUSA_VISIBLE_DEVICES=1 OMP_NUM_THREADS=2 unidock \
   --scoring vina --search_mode fast --num_modes 1 --seed 181129
 ```
 
-`MUSA_VISIBLE_DEVICES=1` restricts the process to assigned physical GPU 1; it
-therefore addresses that visible device as `--device_id 0`.
+The resource layer exposes exactly one device to this job: assigned physical
+GPU 1 is remapped to local index 0. The pre-execution `mthreads-gmi -L` receipt
+identified it as `MTT S5000`, UUID
+`79960515-2565-20f5-7e7e-0bebfe422a33`; querying local index 1 returned "failed
+to find the specified GPU device". The command therefore uses `--device_id 0`
+without overriding the scheduler's visibility environment.
 
 ## Frozen comparisons and exit standard
 
